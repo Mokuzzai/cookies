@@ -19,7 +19,10 @@ use std::fs::File;
 mod minesweeper {
 	use super::*;
 
-	#[derive(FromForm)]
+	pub const STATE: &'static str = "state";
+	pub const DISPLAY: &'static str = "display";
+
+	#[derive(Debug, FromForm)]
 	pub struct Builder {
 		width: usize,
 		height: usize,
@@ -77,6 +80,12 @@ mod minesweeper {
 		data: Box<[Cell]>,
 	}
 
+	impl State {
+		fn extents(&self) -> [usize; 2] {
+			[self.width, self.data.len() / self.width]
+		}
+	}
+
 	const _: () = {
 		use core::fmt::*;
 
@@ -124,36 +133,29 @@ mod minesweeper {
 		fn commit(&mut self, play: &Play) {}
 	}
 
-	#[post("/minesweeper")]
+	#[get("/minesweeper")]
 	pub fn index(mut cookies: Cookies) -> Html<Result<File>> {
 		Html(File::open("assets/minesweeper/index.html").map_err(Into::into))
 	}
 
-	#[post("/minesweeper/start?<builder..>")]
-	pub fn start(builder: Form<Builder>, mut cookies: Cookies) -> Result<Redirect> {
+	#[post("/minesweeper/setup?", data="<builder>")]
+	pub fn setup(builder: Form<Builder>, mut cookies: Cookies) -> Result<&'static str> {
+		println!("{:?}", builder);
+
 		let state = builder.finish();
 
-		cookies.add(Cookie::new("state", serde_json::to_string(&state)?));
+		println!("{:?}", state.extents());
 
-		Ok(Redirect::to(uri!(playing: _)))
+		cookies.add(Cookie::new(STATE, serde_json::to_string(&state)?));
+		cookies.add(Cookie::new(DISPLAY, state.to_string()));
+
+		// Ok(Redirect::to(uri!(render)))
+		Ok("ok")
 	}
 
-	#[post("/minesweeper/playing?<play..>")]
-	pub fn playing(
-		play: Option<Form<Play>>,
-		mut cookies: Cookies,
-	) -> Result<Either<String, Redirect>> {
-		if let Some(cookie) = cookies.get("state") {
-			let mut state: State = serde_json::from_str(cookie.value())?;
-
-			// state.commit(&*play);
-
-			cookies.add(Cookie::new("state", serde_json::to_string(&state)?));
-
-			Ok(Either::Left(state.to_string()))
-		} else {
-			Ok(Either::Right(Redirect::to(uri!(index))))
-		}
+	#[get("/minesweeper/playing")]
+	pub fn render(mut cookies: Cookies) -> Option<String> {
+		cookies.get(DISPLAY).map(|cookie| cookie.value().to_owned())
 	}
 }
 
@@ -179,7 +181,11 @@ fn main() {
 	ignite()
 		.mount(
 			"/",
-			routes![minesweeper::index, minesweeper::start, minesweeper::playing,],
+			routes![
+				minesweeper::index,
+				minesweeper::setup,
+				minesweeper::render,
+			],
 		)
 		.launch();
 }
